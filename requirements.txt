@@ -1,0 +1,7 @@
+cloudscraper>=1.2.71
+beautifulsoup4>=4.12.0
+pymongo>=4.6.0
+lxml>=5.0.0
+pandas>=2.0.0
+nltk>=3.10.0
+Flask>=3.1.3
