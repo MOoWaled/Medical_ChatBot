@@ -39,28 +39,18 @@ echo Preparing NLTK language data...
 "%VENV_PYTHON%" -c "import nltk; [nltk.download(item, quiet=True) for item in ('punkt', 'punkt_tab', 'stopwords', 'wordnet')]"
 if errorlevel 1 goto :install_error
 
-REM The baseline API needs a running MongoDB server and a model previously saved to GridFS.
-"%VENV_PYTHON%" -c "from pymongo import MongoClient; MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=2000).admin.command('ping')" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo MongoDB is not running at localhost:27017.
-    echo The Streamlit interface will open, but the Logistic Baseline option is unavailable.
-    echo Start MongoDB Community Server, then run this file again to enable it.
-) else (
-    "%VENV_PYTHON%" -c "from pymongo import MongoClient; import sys; sys.exit(0 if MongoClient('mongodb://localhost:27017/')['nhs_conditions_db']['models'].find_one({'name':'baseline_logistic'}) else 1)" >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo No baseline_logistic model was found in MongoDB GridFS.
-        echo The Streamlit interface will open, but the Logistic Baseline option is unavailable.
-        echo Train and save the model to nhs_conditions_db first, then run this file again.
-    ) else (
-        echo Starting the Logistic Baseline API on http://localhost:5000 ...
-        start "Medical ChatBot - Logistic Baseline API" /D "%PROJECT_DIR%model_API" cmd /k "\"%VENV_PYTHON%\" app.py"
-    )
-)
+echo Building or updating the symptom-only baseline from the tracked dataset...
+"%VENV_PYTHON%" "%PROJECT_DIR%model_API\train_baseline.py"
+if errorlevel 1 goto :install_error
+
+REM The baseline and RAG index now run from tracked local files; MongoDB is optional.
+echo Starting the grounded Baseline API on http://localhost:5000 ...
+REM Run the virtual-environment Python by a relative path. This avoids
+REM passing the ampersand in "AI & Data science" through a nested cmd.
+start "Medical ChatBot - Grounded Baseline API" /D "%PROJECT_DIR%model_API" cmd /k ..\.venv\Scripts\python.exe app.py
 
 echo Starting the Streamlit GUI on http://localhost:8501 ...
-start "Medical ChatBot - Streamlit GUI" /D "%PROJECT_DIR%gui" cmd /k "\"%VENV_PYTHON%\" -m streamlit run app.py"
+start "Medical ChatBot - Streamlit GUI" /D "%PROJECT_DIR%gui" cmd /k ..\.venv\Scripts\python.exe -m streamlit run app.py
 
 echo.
 echo The GUI opens at http://localhost:8501

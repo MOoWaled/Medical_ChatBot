@@ -23,10 +23,13 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import pickle
 import time
 import sys
+from pathlib import Path
 import numpy as np
 import faiss
+import pandas as pd
 from sentence_transformers import SentenceTransformer
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 # Force UTF-8 output on Windows terminals
 if sys.stdout.encoding != "utf-8":
@@ -82,6 +85,7 @@ METADATA_PATH = os.path.join(INDEX_DIR, "metadata.pkl")
 MONGO_URI       = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
 DB_NAME         = "nhs_conditions_db"
 COLLECTION_NAME = "conditions"
+DATASET_PATH = Path(BASE_DIR).parent / "dataset" / "usable_dataset.csv"
 
 
 # =============================================================
@@ -89,20 +93,32 @@ COLLECTION_NAME = "conditions"
 # =============================================================
 def fetch_records():
     """Return a list of dicts — one per medical condition."""
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    collection = db[COLLECTION_NAME]
+    try:
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+        records = list(client[DB_NAME][COLLECTION_NAME].find())
+        if records:
+            success(f"Using {len(records)} records from MongoDB")
+            return [{
+                "Condition_name": str(doc.get("Condition_name", "")).replace("\ufffd", "'").strip(),
+                "Symptoms": str(doc.get("Symptoms", "")).replace("\ufffd", "'").strip(),
+                "Causes": str(doc.get("Causes", "")).replace("\ufffd", "'").strip(),
+                "Warnings": str(doc.get("Warnings", "")).replace("\ufffd", "'").strip(),
+                "Recommendations": str(doc.get("Recommendations", "")).replace("\ufffd", "'").strip(),
+            } for doc in records]
+    except PyMongoError as exc:
+        warn(f"MongoDB unavailable ({exc.__class__.__name__}); using the tracked CSV dataset instead.")
 
-    records = []
-    for doc in collection.find():
-        records.append({
-            "Condition_name":  doc.get("Condition_name", "").strip(),
-            "Symptoms":        doc.get("Symptoms", "").strip(),
-            "Causes":          doc.get("Causes", "").strip(),
-            "Warnings":        doc.get("Warnings", "").strip(),
-            "Recommendations": doc.get("Recommendations", "").strip(),
-        })
-    return records
+    if not DATASET_PATH.exists():
+        raise FileNotFoundError(f"No MongoDB records and no dataset found at {DATASET_PATH}")
+    frame = pd.read_csv(DATASET_PATH).fillna("")
+    required = ["Condition_name", "Symptoms", "Causes", "Warnings", "Recommendations"]
+    missing = set(required) - set(frame.columns)
+    if missing:
+        raise ValueError(f"Dataset is missing required columns: {sorted(missing)}")
+    frame = frame.drop_duplicates(subset=["Condition_name"], keep="first")
+    success(f"Using {len(frame)} records from {DATASET_PATH.name}")
+    return [{field: str(row[field]).replace("\ufffd", "'").strip() for field in required} for _, row in frame.iterrows()]
 
 
 # =============================================================
@@ -154,6 +170,10 @@ def build_chunks(records):
             "condition": name,
             "chunk_index": len(full_chunks) - 1,
             "char_length": len(chunk_text),
+            "symptoms": symptoms,
+            "causes": causes,
+            "warnings": warnings,
+            "recommendations": recs,
         })
 
     return full_chunks, search_chunks, metadata
