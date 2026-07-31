@@ -178,7 +178,6 @@ Medical_ChatBot/
 │   ├── retriever.py                    # Shared retrieval and grounding rules
 │   └── build_faiss_index.py            # Optional semantic FAISS-index builder
 ├── preprocessing_API/                  # Text cleaning utilities
-├── storage/                            # MongoDB scraper storage layer
 ├── requirements.txt
 └── run_the_ChatBot.bat
 ```
