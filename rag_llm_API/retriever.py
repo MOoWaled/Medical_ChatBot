@@ -20,7 +20,6 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import faiss
 import joblib
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -71,6 +70,10 @@ class ConditionRetriever:
     """Hybrid FAISS + keyword retriever over one chunk per known condition."""
 
     def __init__(self) -> None:
+        # Keep the default offline TF-IDF mode light-weight. This optional
+        # dependency is needed only when RAG_EMBEDDING_BACKEND=sentence_transformer.
+        from sentence_transformers import SentenceTransformer
+
         if not INDEX_PATH.exists() or not CHUNKS_PATH.exists():
             raise FileNotFoundError(
                 "RAG index is missing. Run `python rag_llm_API/build_faiss_index.py` first."
@@ -164,6 +167,19 @@ class TfidfFaissRetriever:
             )
         return candidates
 
+    def get_condition(self, condition_name: str) -> dict[str, Any] | None:
+        """Return source fields for an exact condition label from the local records."""
+        expected = _normalise_name(condition_name)
+        for record in self.records:
+            if _normalise_name(_clean_text(record.get("Condition_name"))) == expected:
+                return {
+                    "condition": _clean_text(record.get("Condition_name")),
+                    "symptoms": _clean_text(record.get("Symptoms")),
+                    "causes": _clean_text(record.get("Causes")),
+                    "warnings": _clean_text(record.get("Warnings")),
+                    "recommendations": _clean_text(record.get("Recommendations")),
+                }
+        return None
 
 def grounded_result(candidate: dict[str, Any], *, candidates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Return only fields stored in the knowledge base, never generated clinical text."""

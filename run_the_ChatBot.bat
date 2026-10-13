@@ -5,6 +5,15 @@ REM Always run relative to the folder containing this script.
 set "PROJECT_DIR=%~dp0"
 cd /d "%PROJECT_DIR%"
 
+REM FAISS/NumPy can otherwise ask OpenBLAS to reserve worker memory for every
+REM CPU core. One worker is sufficient for the small local retrieval index and
+REM prevents startup failures on memory-constrained Windows machines.
+set "OPENBLAS_NUM_THREADS=1"
+set "OMP_NUM_THREADS=1"
+set "MKL_NUM_THREADS=1"
+set "NUMEXPR_NUM_THREADS=1"
+set "VECLIB_MAXIMUM_THREADS=1"
+
 REM Prefer the Windows Python launcher so a specific Python version can be selected.
 set "SYSTEM_PYTHON="
 where py >nul 2>&1
@@ -34,12 +43,12 @@ if errorlevel 1 goto :install_error
 "%VENV_PYTHON%" -m pip install -r "%PROJECT_DIR%requirements.txt"
 if errorlevel 1 goto :install_error
 
-REM These datasets are required by preprocessing_API and are safe to re-check on each run.
-echo Preparing NLTK language data...
-"%VENV_PYTHON%" -c "import nltk; [nltk.download(item, quiet=True) for item in ('punkt', 'punkt_tab', 'stopwords', 'wordnet')]"
-if errorlevel 1 goto :install_error
+REM The RAG application does not require downloadable NLTK data at startup.
+REM Avoid requesting it on every run: the public NLTK server can return HTTP 429.
+REM preprocessing_API uses a local fallback tokenizer when those optional resources are unavailable.
+echo NLTK language data is optional; continuing without a download check...
 
-echo Building or updating the symptom-only baseline from the tracked dataset...
+echo Building or checking the symptom-only baseline from the tracked dataset...
 "%VENV_PYTHON%" "%PROJECT_DIR%model_API\train_baseline.py"
 if errorlevel 1 goto :install_error
 

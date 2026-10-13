@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Locally trained deep-learning checkpoints can be large and are reproducible.
+model_API/checkpoints/
