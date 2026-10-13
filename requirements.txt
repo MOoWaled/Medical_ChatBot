@@ -21,7 +21,3 @@ faiss-cpu>=1.8.0
 langchain-classic>=1.0.0
 langchain-core>=1.0.0
 sentence-transformers>=3.0.0
-
-# Deep-learning sequence classifiers and their interactive training notebook
-torch>=2.2.0
-jupyterlab>=4.0.0

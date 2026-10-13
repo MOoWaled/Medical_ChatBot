@@ -13,6 +13,7 @@ import requests
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
+from rag_llm_API.retriever import get_retriever, grounded_result, match_candidate
 
 
 DEFAULT_BASELINE_URL = "http://localhost:5000"
@@ -34,32 +35,16 @@ def analyse_symptoms(
     qwen_url: str,
     mistral_url: str,
     mistral_api_key: str,
-    age: int | None = None,
-    gender: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve first, then let a provider select only from the known candidates."""
     if model == "logistic_baseline":
-        return _call_baseline(symptoms, baseline_url, age=age, gender=gender)
-    if model in {"deep_rnn", "deep_lstm"}:
-        return _call_deep_learning(
-            symptoms,
-            baseline_url,
-            model.removeprefix("deep_"),
-            age=age,
-            gender=gender,
-        )
-
-    # These imports are needed only for the optional LLM paths. Keeping them
-    # lazy lets the local-only GUI open cleanly before the local API is started.
-    from rag_llm_API.retriever import grounded_result, match_candidate
+        return _call_baseline(symptoms, baseline_url)
 
     candidates = _retrieve_candidates(symptoms)
     if model == "qwen":
-        selected_name = _call_qwen(symptoms, candidates, qwen_url, age=age, gender=gender)
+        selected_name = _call_qwen(symptoms, candidates, qwen_url)
     elif model == "mistral":
-        selected_name = _call_mistral(
-            symptoms, candidates, mistral_url, mistral_api_key, age=age, gender=gender
-        )
+        selected_name = _call_mistral(symptoms, candidates, mistral_url, mistral_api_key)
     else:
         raise ModelRequestError(f"Unsupported model: {model}")
 
@@ -67,14 +52,11 @@ def analyse_symptoms(
     selected = match_candidate(selected_name, candidates) or candidates[0]
     result = grounded_result(selected, candidates=candidates)
     result["model_selection"] = selected_name or "No valid selection; used the top retrieved condition."
-    result["patient_context"] = {"age": age, "gender": gender}
     return result
 
 
 def _retrieve_candidates(symptoms: str) -> list[dict[str, Any]]:
     try:
-        from rag_llm_API.retriever import get_retriever
-
         candidates = get_retriever().search(symptoms, top_k=3)
     except Exception as error:
         raise ModelRequestError(
@@ -86,16 +68,10 @@ def _retrieve_candidates(symptoms: str) -> list[dict[str, Any]]:
     return candidates
 
 
-def _call_baseline(
-    symptoms: str, base_url: str, *, age: int | None, gender: str | None
-) -> dict[str, Any]:
+def _call_baseline(symptoms: str, base_url: str) -> dict[str, Any]:
     endpoint = _require_url(base_url, "Logistic Baseline") + "/predict"
     try:
-        response = requests.post(
-            endpoint,
-            json={"text": symptoms, "age": age, "gender": gender},
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
+        response = requests.post(endpoint, json={"text": symptoms}, timeout=REQUEST_TIMEOUT_SECONDS)
     except requests.RequestException as error:
         raise ModelRequestError(f"Could not reach the Logistic Baseline API: {error}") from error
     payload = _json_response(response, "Logistic Baseline")
@@ -111,42 +87,6 @@ def _call_baseline(
         "recommendations": str(details.get("recommendations") or "Not available"),
         "confidence": payload.get("confidence"),
         "retrieval_candidates": payload.get("retrieval_candidates", []),
-        "patient_context": payload.get("patient_context", {"age": age, "gender": gender}),
-    }
-
-
-def _call_deep_learning(
-    symptoms: str,
-    base_url: str,
-    deep_model: str,
-    *,
-    age: int | None,
-    gender: str | None,
-) -> dict[str, Any]:
-    endpoint = _require_url(base_url, "Deep Learning") + "/predict/deep-learning"
-    try:
-        response = requests.post(
-            endpoint,
-            json={"text": symptoms, "deep_model": deep_model, "age": age, "gender": gender},
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as error:
-        raise ModelRequestError(f"Could not reach the Deep Learning API: {error}") from error
-    payload = _json_response(response, "Deep Learning")
-    if response.status_code >= 400:
-        raise ModelRequestError(_error_message(payload, response, "Deep Learning"))
-    details = payload.get("medical_details") or {}
-    return {
-        "condition": str(details.get("condition") or payload.get("predicted_condition") or "Not available"),
-        "symptoms": str(details.get("symptoms") or symptoms),
-        "causes": str(details.get("causes") or "Not available"),
-        "warnings": str(details.get("warnings") or "Not available"),
-        "recommendations": str(details.get("recommendations") or "Not available"),
-        "confidence": payload.get("confidence"),
-        "retrieval_candidates": payload.get("retrieval_candidates", []),
-        "patient_context": payload.get("patient_context", {"age": age, "gender": gender}),
-        "training_metrics": payload.get("training_metrics", {}),
-        "selection_mode": payload.get("selection_mode", ""),
     }
 
 
@@ -168,13 +108,7 @@ def _candidate_context(candidates: list[dict[str, Any]]) -> str:
     return "\n\n".join(sections)
 
 
-def _selection_prompt(
-    symptoms: str,
-    candidates: list[dict[str, Any]],
-    *,
-    age: int | None,
-    gender: str | None,
-) -> tuple[str, str]:
+def _selection_prompt(symptoms: str, candidates: list[dict[str, Any]]) -> tuple[str, str]:
     system = (
         "You are a retrieval-grounded medical condition selector. Use only the candidates in the supplied "
         "knowledge-base context. Do not diagnose, invent a condition, paraphrase a condition name, or add facts. "
@@ -183,31 +117,13 @@ def _selection_prompt(
         "KNOWLEDGE-BASE CANDIDATES:\n"
         f"{_candidate_context(candidates)}"
     )
-    context_parts = []
-    if age is not None:
-        context_parts.append(f"Age: {age}")
-    if gender:
-        context_parts.append(f"Gender: {gender}")
-    context = "\n".join(context_parts) or "Not provided"
-    user = (
-        f"PATIENT SYMPTOMS:\n{symptoms}\n\n"
-        f"OPTIONAL PATIENT CONTEXT:\n{context}\n\n"
-        "Use this context only when choosing among the supplied candidates. Do not add demographic facts "
-        "or alter retrieved symptoms, causes, warnings, or recommendations."
-    )
+    user = f"PATIENT SYMPTOMS:\n{symptoms}"
     return system, user
 
 
-def _call_qwen(
-    symptoms: str,
-    candidates: list[dict[str, Any]],
-    base_url: str,
-    *,
-    age: int | None,
-    gender: str | None,
-) -> str:
+def _call_qwen(symptoms: str, candidates: list[dict[str, Any]], base_url: str) -> str:
     root = _require_url(base_url, "Qwen")
-    system, user = _selection_prompt(symptoms, candidates, age=age, gender=gender)
+    system, user = _selection_prompt(symptoms, candidates)
     root = re.sub(r"/api/(generate|chat)?$", "", root.rstrip("/"))
     headers = {"ngrok-skip-browser-warning": "true", "Content-Type": "application/json"}
     model_name = os.getenv("QWEN_MODEL", "qwen3:4b")
@@ -257,17 +173,9 @@ def _call_qwen(
     )
 
 
-def _call_mistral(
-    symptoms: str,
-    candidates: list[dict[str, Any]],
-    base_url: str,
-    api_key: str,
-    *,
-    age: int | None,
-    gender: str | None,
-) -> str:
+def _call_mistral(symptoms: str, candidates: list[dict[str, Any]], base_url: str, api_key: str) -> str:
     root = _require_url(base_url, "Mistral")
-    system, user = _selection_prompt(symptoms, candidates, age=age, gender=gender)
+    system, user = _selection_prompt(symptoms, candidates)
     official_api = "api.mistral.ai" in root.lower() or root.rstrip("/").endswith("/chat/completions")
 
     if official_api:

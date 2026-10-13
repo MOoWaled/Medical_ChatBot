@@ -9,7 +9,7 @@
 | GitHub username | [MOoWaled](https://github.com/MOoWaled) |
 | Challenge batch | June–July 2026 |
 | Training program | Large Language Models (LLMs) Program |
-| Organization     | [**Edrak for AI**](https://edrak4ai.com/) |
+| Organization     | [**Edrak for Ai**](https://edrak4ai.com/
 
 ## 📖 Project Overview
 
@@ -24,8 +24,6 @@ Three interface choices are available:
 - **Mistral** — a custom ngrok/Flask Mistral endpoint or the official Mistral API selects only from the retrieved candidates.
 
 The LLMs do not author medical facts. They can choose a retrieved condition, but the UI displays the knowledge-base record itself.
-
-Age and gender can be supplied as optional patient context. They are validated and passed through the UI, baseline API, and LLM-selection prompt, but they never generate or modify medical facts: the current knowledge base has no demographic eligibility fields, so the displayed response remains grounded in its retrieved record.
 
 ## 🗂️ Data Collection and Preparation Journey
 
@@ -45,7 +43,7 @@ The completed dataset was then reviewed carefully to check structure, consistenc
 
 After review, the condition records were transferred to MongoDB for structured storage and repeatable data access. A preprocessing API cleans medical text with tokenisation, stop-word removal, and lemmatisation, producing the cleaned symptom representations used by the retrieval baseline.
 
-The final project dataset is stored in `dataset/usable_dataset.csv`, with reviewed NHS source supplements in `dataset/supplemental_conditions.csv` when a linked condition page needs to be added after the initial scrape. The baseline fits a TF-IDF representation on the symptom field and builds a local FAISS index. This retrieval-based design avoids presenting a misleading supervised accuracy score when the dataset contains approximately one source document per condition.
+The final project dataset is stored in `dataset/usable_dataset.csv`. The baseline fits a TF-IDF representation on the symptom field and builds a local FAISS index. This retrieval-based design avoids presenting a misleading supervised accuracy score when the dataset contains approximately one source document per condition.
 
 ## 🏗️ Architecture
 
@@ -95,7 +93,6 @@ flowchart LR
 - A launcher that creates a virtual environment and installs dependencies automatically.
 - Two-stage data collection: conventional scraping followed by Mistral-assisted completion for missing fields.
 - MongoDB storage and a preprocessing API for reusable structured-data workflows.
-- Optional age and gender inputs propagated safely through all model paths.
 
 ## 🛠️ Technologies Used
 
@@ -116,12 +113,10 @@ flowchart LR
 1. Clone the repository.
 2. Double-click `run_the_ChatBot.bat`.
 
-The launcher creates `.venv`, installs `requirements.txt`, creates or refreshes the local baseline artifacts, and opens:
+The launcher creates `.venv`, installs `requirements.txt`, downloads the required NLTK resources, creates or refreshes the local baseline artifacts, and opens:
 
 - Grounded Baseline API: `http://localhost:5000`
 - Streamlit UI: `http://localhost:8501`
-
-The launcher does not download NLTK language data on every run. This prevents temporary NLTK rate-limit errors (HTTP 429) from blocking the application. The preprocessing API uses its local tokenizer and stop-word fallback if optional NLTK data is not already installed.
 
 ### Manual setup
 
@@ -146,8 +141,7 @@ streamlit run gui\app.py
 1. Open `http://localhost:8501`.
 2. Choose **Grounded FAISS Baseline**, **Qwen**, or **Mistral**.
 3. Enter a symptom description.
-4. Optionally enter age and gender in the sidebar.
-5. Select **Analyse symptoms**.
+4. Select **Analyse symptoms**.
 
 ### Qwen configuration
 
@@ -193,20 +187,6 @@ Medical_ChatBot/
 For symptoms including cracked skin, oozing blisters, burning or stinging, and scaling between the toes, the grounded baseline retrieves **Athlete’s foot** as the highest-ranked condition from the dataset.
 
 Retrieval similarity is an information-retrieval score, not a medical probability or a diagnosis confidence.
-
-## Evaluation
-
-A reproducible candidate-retrieval benchmark is available in [reports/experimentation_evaluation_report.md](reports/experimentation_evaluation_report.md). Run it locally with:
-
-```powershell
-.\.venv\Scripts\python.exe evaluation\evaluate_retrieval.py --top-k 3
-```
-
-The report distinguishes engineering retrieval metrics from clinical validation and documents the current limitations of the baseline.
-
-### Deep Learning RNN and LSTM
-
-The project includes a sequence-classification notebook at `model_API/notebooks/RNN_LSTM_Medical_Classification.ipynb`. It trains `Embedding → RNN/LSTM → Dropout → Dense` models from the base symptom dataset and saves per-epoch checkpoints plus `best.pt` under `model_API/checkpoints/deep_learning/`. After training, choose **Deep Learning (RNN)** or **Deep Learning (LSTM)** in the Streamlit sidebar. The model ranks only RAG-retrieved conditions, while the displayed medical fields remain grounded in RAG records. A quality guard preserves the top RAG match if the checkpoint evaluation is too weak. The notebook’s held-out chunk metrics are engineering experiment metrics, not clinical diagnostic accuracy.
 
 ## 🔮 Future Improvements
 
